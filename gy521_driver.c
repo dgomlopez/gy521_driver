@@ -3,6 +3,7 @@
 #include <linux/kernel.h>   // pr_*
 #include <linux/fs.h>       // file_operations
 #include <linux/device.h>   // class_create(), device_create()
+#include <linux/i2c.h>      // i2c_*
 
 #define CLASS_NAME "gy521_class"
 #define DEVICE_NAME "gy521_device"
@@ -12,10 +13,12 @@
 #define WHO_AM_I_REG 0x75   // To verify the correct address
 
 
+static int major_number;                    // Register number in /dev
 static struct class* gy521_class = NULL;    // user-space
 static struct device* gy521_device = NULL;  // /dev
 
-static int major_number;
+static struct i2c_adapter *adapter;         // Access to I2C (connection with the hardware)
+static struct i2c_client *gy521_client;     // Represent gy521 device on the I2C
 
 // Handle device from user-space
 static int gy521_open(struct inode *inode, struct file *file){
@@ -59,6 +62,8 @@ static int __init gy521_init(void){
         unregister_chrdev(major_number, DEVICE_NAME);
         return PTR_ERR(gy521_device);
     }
+
+    adapter = i2c
 
     
     return 0;
