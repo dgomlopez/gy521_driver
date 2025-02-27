@@ -17,8 +17,30 @@ static int major_number;                    // Register number in /dev
 static struct class* gy521_class = NULL;    // user-space
 static struct device* gy521_device = NULL;  // /dev
 
-static struct i2c_adapter *adapter;         // Access to I2C (connection with the hardware)
-static struct i2c_client *gy521_client;     // Represent gy521 device on the I2C
+static struct i2c_adapter *adapter = NULL;         // Access to I2C (connection with the hardware)
+struct i2c_adapter *stored_adapter = NULL;
+static int gy521_addr = 0;
+struct i2c_board_info gy521_info = {
+    I2C_BOARD_INFO("gy521", gy521_addr)
+};
+static struct i2c_client *gy521_client = NULL;     // Represent gy521 device on the I2C
+static int check_addr(struct i2c_adapter *adapter, int addr){
+        struct i2c_client *client;
+        char buf;
+        int ret;
+
+        client = i2c_new_dummy(adapter, addr);
+        if(!client)
+            return -ENODEV;
+        
+        ret = i2c_smbus_read_byte_data(client, WHO_AM_I_REG);
+        i2c_unregister_device(client);
+
+        if (ret < 0)
+            return -ENODEV;
+        
+        return 0;
+}
 
 // Handle device from user-space
 static int gy521_open(struct inode *inode, struct file *file){
@@ -50,27 +72,61 @@ static int __init gy521_init(void){
 
     gy521_class = class_create(CLASS_NAME);
     if (IS_ERR(gy521_class)){
-        pr_err("GY-521: create device class failed")
+        pr_err("GY-521: create device class failed");
         unregister_chrdev(major_number, DEVICE_NAME);
         return PTR_ERR(gy521_class);
     }
     
     gy521_device = device_create(gy521_class, NULL, MKDEV(major_number, 0), NULL, DEVICE_NAME);
     if (IS_ERR(gy521_device)){
-        pr_err("GY-521: create device failed")
+        pr_err("GY-521: create device failed");
         class_destroy(gy521_class);
         unregister_chrdev(major_number, DEVICE_NAME);
         return PTR_ERR(gy521_device);
     }
 
-    adapter = i2c
+    i2c_for_each_adapter(adapter) {
+        if (check_addr(adapter,MPU6050_ADDR_1) == 0){
+            pr_info("GY-521: device found at 0x%02X", MPU6050_ADDR_1);
+            gy521_addr = MPU6050_ADDR_1;
+            stored_adapter = adapter;
+            break;
+        }
+        if (check_addr(adapter,MPU6050_ADDR_2) == 0){
+            pr_info("GY-521: device found at 0x%02X", MPU6050_ADDR_2);
+            gy521_addr = MPU6050_ADDR_2;
+            stored_adapter = adapter;
+            break;
+        }
+    }
 
+    gy521_info.addr = gy521_addr;
+
+    if (gy521_addr == 0){
+        pr_err("GY-521: device not found on I2C bus");
+        return -ENODEV;
+    }
+
+    gy521_client = i2c_new_device(stored_adapter, &gy521_info);
+    if (!gy521_client){
+        pr_err("GY-521: create I2C client failed");
+        return -ENODEV;
+    }
     
     return 0;
 }
 
 static void __exit gy521_exit(void){
     pr_info("GY-521 I2C driver is unloaded");
+
+    if (gy521_client){
+        i2c_unregister_device(gy521_client);
+    }
+    
+    device_destroy(gy521_class, MKDEV(major_number, 0));
+    class_destroy(gy521_class);
+    unregister_chrdev(major_number, DEVICE_NAME);
+    
 }
 
 module_init(gy521_init);
